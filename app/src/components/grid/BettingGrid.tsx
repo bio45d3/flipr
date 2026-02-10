@@ -1,134 +1,53 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { GridCell } from './GridCell';
-import { PriceLine } from './PriceLine';
-import { BetModal } from './BetModal';
-import { Confetti } from './Confetti';
-import { useBetStore, COLUMN_WIDTH, SCROLL_SPEED, COLUMN_INTERVAL, Bet } from '@/store/betStore';
+import { useState, useEffect } from 'react';
 
 const ROW_HEIGHT = 75;
-const PRICE_LINE_X = 130;
-const VISIBLE_COLUMNS = 12;
+const COLUMN_WIDTH = 90;
+const VISIBLE_ROWS = 8;
+const VISIBLE_COLUMNS = 10;
+const PRICE_STEP = 0.10;
+const BASE_PRICE = 135.50;
 
 export function BettingGrid() {
-  const [mounted, setMounted] = useState(false);
+  const [currentPrice, setCurrentPrice] = useState(BASE_PRICE);
   const [scrollX, setScrollX] = useState(0);
-  const animationRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
-  
-  const currentPrice = useBetStore((s) => s.currentPrice);
-  const addPricePoint = useBetStore((s) => s.addPricePoint);
-  const bets = useBetStore((s) => s.bets);
-  const columns = useBetStore((s) => s.columns);
-  const generateColumns = useBetStore((s) => s.generateColumns);
-  const resolveBet = useBetStore((s) => s.resolveBet);
-  const removeBet = useBetStore((s) => s.removeBet);
-  const priceStep = useBetStore((s) => s.priceStep);
-  const rowCount = useBetStore((s) => s.rowCount);
-  const getPriceRows = useBetStore((s) => s.getPriceRows);
-  
-  const priceRows = getPriceRows();
-  const gridHeight = rowCount * ROW_HEIGHT;
-
-  // Mount and initialize
-  useEffect(() => {
-    setMounted(true);
-    generateColumns();
-  }, [generateColumns]);
 
   // Price simulation
   useEffect(() => {
-    if (!mounted) return;
-    
     const interval = setInterval(() => {
-      const drift = (Math.random() - 0.5) * 0.03;
-      addPricePoint(currentPrice + drift);
-    }, 200);
-    
-    return () => clearInterval(interval);
-  }, [mounted, currentPrice, addPricePoint]);
-
-  // Animation loop using requestAnimationFrame
-  useEffect(() => {
-    if (!mounted) return;
-
-    const animate = (timestamp: number) => {
-      if (lastTimeRef.current === 0) {
-        lastTimeRef.current = timestamp;
-      }
-      
-      const delta = timestamp - lastTimeRef.current;
-      lastTimeRef.current = timestamp;
-      
-      setScrollX((prev) => prev + SCROLL_SPEED * (delta / 1000));
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animationRef.current = requestAnimationFrame(animate);
-    
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [mounted]);
-
-  // Bet resolution
-  useEffect(() => {
-    if (!mounted) return;
-    
-    const interval = setInterval(() => {
-      const now = Date.now();
-      
-      bets.forEach((bet) => {
-        if (bet.status !== 'pending') return;
-        
-        const column = columns.find((c) => c.id === bet.columnId);
-        if (!column) return;
-        
-        const columnAge = (now - column.createdAt) / 1000;
-        const columnScrolled = columnAge * SCROLL_SPEED;
-        const columnX = VISIBLE_COLUMNS * COLUMN_WIDTH - columnScrolled;
-        
-        if (columnX <= PRICE_LINE_X) {
-          const priceMatch = Math.abs(currentPrice - bet.targetPrice) < priceStep / 2;
-          resolveBet(bet.id, priceMatch);
-          setTimeout(() => removeBet(bet.id), 3000);
-        }
+      setCurrentPrice(prev => {
+        const drift = (Math.random() - 0.5) * 0.05;
+        return prev + drift;
       });
-    }, 100);
-    
+    }, 500);
     return () => clearInterval(interval);
-  }, [mounted, bets, columns, currentPrice, priceStep, resolveBet, removeBet]);
+  }, []);
 
-  const getMultiplier = (columnIndex: number) => {
-    const timeToArrival = columnIndex * COLUMN_INTERVAL;
-    if (timeToArrival <= 3) return 5.0;
-    if (timeToArrival <= 6) return 3.5;
-    if (timeToArrival <= 9) return 2.5;
-    if (timeToArrival <= 15) return 2.0;
-    if (timeToArrival <= 24) return 1.5;
-    return 1.2;
-  };
+  // Scroll animation
+  useEffect(() => {
+    let animationId: number;
+    let lastTime = performance.now();
+    
+    const animate = (time: number) => {
+      const delta = time - lastTime;
+      lastTime = time;
+      setScrollX(prev => (prev + delta * 0.03) % (COLUMN_WIDTH * 3));
+      animationId = requestAnimationFrame(animate);
+    };
+    
+    animationId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationId);
+  }, []);
 
-  const getBetForCell = (rowPrice: number, columnId: string): Bet | undefined => {
-    return bets.find(
-      (b) => Math.abs(b.targetPrice - rowPrice) < 0.01 && b.columnId === columnId
-    );
-  };
-
-  // Loading state
-  if (!mounted || columns.length === 0) {
-    return (
-      <div className="w-full max-w-5xl mx-auto">
-        <div className="flex items-center justify-center h-[620px] bg-[#0a0a0f] border border-zinc-800 rounded-xl">
-          <div className="text-zinc-500">Loading grid...</div>
-        </div>
-      </div>
-    );
+  // Generate price rows centered around current price
+  const priceRows = [];
+  const centerPrice = Math.round(currentPrice / PRICE_STEP) * PRICE_STEP;
+  for (let i = Math.floor(VISIBLE_ROWS / 2); i >= -Math.floor(VISIBLE_ROWS / 2) + 1; i--) {
+    priceRows.push(centerPrice + i * PRICE_STEP);
   }
+
+  const gridHeight = VISIBLE_ROWS * ROW_HEIGHT;
 
   return (
     <div className="w-full max-w-5xl mx-auto">
@@ -136,55 +55,55 @@ export function BettingGrid() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-xl font-bold text-white">SOL/USD Grid</h2>
-          <p className="text-sm text-zinc-500">Click cells ahead of the price line to bet</p>
+          <p className="text-sm text-zinc-500">Click cells to place bets</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-sm text-zinc-500">Live Price</div>
-            <div className="text-2xl font-mono font-bold text-white">
-              ${currentPrice.toFixed(4)}
-            </div>
+        <div className="text-right">
+          <div className="text-sm text-zinc-500">Live Price</div>
+          <div className="text-2xl font-mono font-bold text-white">
+            ${currentPrice.toFixed(4)}
           </div>
-          <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
         </div>
       </div>
 
-      {/* Time axis labels */}
-      <div className="flex mb-2 text-xs text-zinc-500 font-medium" style={{ paddingLeft: PRICE_LINE_X + 10 }}>
+      {/* Time labels */}
+      <div className="flex mb-2 text-xs text-zinc-500" style={{ paddingLeft: 140 }}>
         {Array.from({ length: VISIBLE_COLUMNS }).map((_, i) => (
           <div key={i} className="text-center" style={{ width: COLUMN_WIDTH }}>
-            {i * COLUMN_INTERVAL}s
+            {i * 3}s
           </div>
         ))}
       </div>
 
-      {/* Main Grid Container */}
+      {/* Grid */}
       <div 
-        className="relative bg-[#0a0a0f] border border-zinc-800 rounded-xl overflow-hidden"
+        className="relative bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden"
         style={{ height: gridHeight + 20 }}
       >
-        {/* Price Line (fixed position) */}
-        <PriceLine 
-          gridHeight={gridHeight} 
-          rowHeight={ROW_HEIGHT}
-        />
+        {/* Price line */}
+        <div 
+          className="absolute left-0 top-0 bottom-0 w-[130px] flex items-center justify-end pr-2 border-r-2 border-red-500 z-10"
+          style={{ background: 'linear-gradient(to right, #0a0a0f, transparent)' }}
+        >
+          <div className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">
+            ${currentPrice.toFixed(2)}
+          </div>
+        </div>
 
-        {/* Scrolling Grid */}
+        {/* Scrolling grid */}
         <div 
           className="absolute top-2 bottom-2 overflow-hidden"
-          style={{ left: PRICE_LINE_X, right: 10 }}
+          style={{ left: 130, right: 10 }}
         >
           <div
             className="flex flex-col gap-1"
-            style={{ transform: `translateX(${-scrollX % (COLUMN_WIDTH * COLUMN_INTERVAL)}px)` }}
+            style={{ transform: `translateX(${-scrollX}px)` }}
           >
-            {/* Price Rows */}
-            {priceRows.map((price, rowIndex) => (
-              <div key={price} className="flex gap-1">
-                {/* Row label */}
+            {priceRows.map((price) => (
+              <div key={price.toFixed(2)} className="flex gap-1">
+                {/* Price label */}
                 <div 
                   className={`flex items-center justify-end pr-2 font-mono text-sm shrink-0 ${
-                    Math.abs(price - currentPrice) < priceStep / 2
+                    Math.abs(price - currentPrice) < PRICE_STEP / 2
                       ? 'text-white font-bold'
                       : price > currentPrice 
                         ? 'text-green-400/70' 
@@ -196,62 +115,33 @@ export function BettingGrid() {
                 </div>
                 
                 {/* Cells */}
-                {columns.slice(0, VISIBLE_COLUMNS).map((column, colIndex) => {
-                  const arrivalTime = column.createdAt + column.timeOffset * 1000;
-                  
+                {Array.from({ length: VISIBLE_COLUMNS }).map((_, colIdx) => {
+                  const multiplier = colIdx <= 1 ? 5.0 : colIdx <= 3 ? 3.0 : colIdx <= 5 ? 2.0 : 1.5;
                   return (
-                    <GridCell
-                      key={`${price}-${column.id}`}
-                      row={rowIndex}
-                      columnId={column.id}
-                      targetPrice={price}
-                      multiplier={getMultiplier(colIndex)}
-                      arrivalTime={arrivalTime}
-                      bet={getBetForCell(price, column.id)}
-                    />
+                    <button
+                      key={colIdx}
+                      className="flex flex-col items-center justify-center rounded-lg border-2 border-zinc-700/50 bg-zinc-900/40 hover:bg-zinc-800/60 hover:border-zinc-600 transition-all"
+                      style={{ width: COLUMN_WIDTH, height: ROW_HEIGHT - 5 }}
+                      onClick={() => alert(`Bet on $${price.toFixed(2)} @ ${multiplier}x`)}
+                    >
+                      <span className={`text-lg font-bold ${
+                        multiplier >= 3 ? 'text-yellow-400' : 
+                        multiplier >= 2 ? 'text-green-400' : 
+                        'text-zinc-400'
+                      }`}>
+                        {multiplier.toFixed(1)}x
+                      </span>
+                      <span className="text-xs text-zinc-500">
+                        ${price.toFixed(2)}
+                      </span>
+                    </button>
                   );
                 })}
               </div>
             ))}
           </div>
         </div>
-
-        {/* Left fade overlay */}
-        <div 
-          className="absolute top-0 bottom-0 pointer-events-none z-20"
-          style={{
-            left: PRICE_LINE_X - 30,
-            width: 40,
-            background: 'linear-gradient(to right, #0a0a0f, transparent)',
-          }}
-        />
       </div>
-
-      {/* Active Bets Summary */}
-      {bets.filter((b) => b.status === 'pending' && b.isOwn).length > 0 && (
-        <div className="mt-4 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">
-            Your Active Bets ({bets.filter((b) => b.status === 'pending' && b.isOwn).length})
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            {bets
-              .filter((b) => b.status === 'pending' && b.isOwn)
-              .map((bet) => (
-                <div
-                  key={bet.id}
-                  className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg px-3 py-2"
-                >
-                  <div className="text-sm font-medium text-orange-300">
-                    ${bet.targetPrice.toFixed(2)}
-                  </div>
-                  <div className="text-xs text-zinc-400">
-                    {bet.amount} SOL @ {bet.multiplier}x
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
 
       {/* Legend */}
       <div className="mt-4 flex items-center justify-center gap-6 text-xs text-zinc-500">
@@ -260,24 +150,14 @@ export function BettingGrid() {
           <span>Your Bet</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-purple-500/30 border-2 border-purple-500" />
-          <span>Others</span>
-        </div>
-        <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded bg-green-500/40 border-2 border-green-400" />
           <span>Won</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-red-500/30 border-2 border-red-500/50 opacity-40" />
+          <div className="w-4 h-4 rounded bg-red-500/30 border-2 border-red-500/50" />
           <span>Lost</span>
         </div>
       </div>
-
-      {/* Bet Modal */}
-      <BetModal />
-
-      {/* Confetti */}
-      <Confetti />
     </div>
   );
 }
