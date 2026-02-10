@@ -214,8 +214,8 @@ export function BettingGrid() {
                 
                 {/* Cells */}
                 {columns.slice(0, VISIBLE_COLUMNS).map((column, colIndex) => {
-                  const now = Date.now();
-                  const timeToArrival = column.timeOffset - ((now - column.createdAt) / 1000);
+                  // Use a stable arrival time based on column creation
+                  const arrivalTime = column.createdAt + column.timeOffset * 1000;
                   
                   return (
                     <GridCell
@@ -224,7 +224,7 @@ export function BettingGrid() {
                       columnId={column.id}
                       targetPrice={price}
                       multiplier={getMultiplier(colIndex)}
-                      arrivalTime={now + timeToArrival * 1000}
+                      arrivalTime={arrivalTime}
                       bet={getBetForCell(price, column.id)}
                     />
                   );
