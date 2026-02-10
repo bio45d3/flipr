@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0a;
+  --background: #0a0a0f;
   --foreground: #fafafa;
 }
 
@@ -25,26 +25,26 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #18181b;
+  background: #0a0a0f;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: #27272a;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: #3f3f46;
 }
 
 /* Wallet adapter modal overrides */
 .wallet-adapter-modal-wrapper {
-  background: rgba(0, 0, 0, 0.8) !important;
+  background: rgba(0, 0, 0, 0.85) !important;
   backdrop-filter: blur(8px);
 }
 
 .wallet-adapter-modal-container {
-  background: #18181b !important;
+  background: #0f0f14 !important;
   border: 1px solid #27272a !important;
   border-radius: 1rem !important;
 }
@@ -62,13 +62,13 @@ body {
 }
 
 .wallet-adapter-button {
-  background: #27272a !important;
+  background: #1a1a1f !important;
   border-radius: 0.75rem !important;
   transition: all 0.2s !important;
 }
 
 .wallet-adapter-button:hover {
-  background: #3f3f46 !important;
+  background: #27272a !important;
 }
 
 .wallet-adapter-button-trigger {
@@ -93,6 +93,21 @@ body {
   animation: pulse-slow 3s ease-in-out infinite;
 }
 
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s linear infinite;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  background-size: 200% 100%;
+}
+
 /* Number input without spinners */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
@@ -102,4 +117,31 @@ input[type="number"]::-webkit-outer-spin-button {
 
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* Grid cell glow effects */
+.cell-glow-orange {
+  box-shadow: 0 0 15px rgba(249, 115, 22, 0.3);
+}
+
+.cell-glow-green {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+}
+
+.cell-glow-red {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
+
+/* Price line pulse */
+@keyframes price-line-pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(239, 68, 68, 0.8);
+  }
+}
+
+.price-line-glow {
+  animation: price-line-pulse 1.5s ease-in-out infinite;
 }
