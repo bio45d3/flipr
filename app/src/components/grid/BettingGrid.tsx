@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { motion, useAnimationFrame } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { GridCell } from './GridCell';
 import { PriceLine } from './PriceLine';
 import { BetModal } from './BetModal';
@@ -9,73 +9,82 @@ import { Confetti } from './Confetti';
 import { useBetStore, COLUMN_WIDTH, SCROLL_SPEED, COLUMN_INTERVAL, Bet } from '@/store/betStore';
 
 const ROW_HEIGHT = 75;
-const PRICE_LINE_X = 130; // px from left where price line sits
+const PRICE_LINE_X = 130;
 const VISIBLE_COLUMNS = 12;
 
 export function BettingGrid() {
-  const {
-    currentPrice,
-    addPricePoint,
-    bets,
-    columns,
-    generateColumns,
-    resolveBet,
-    removeBet,
-    priceStep,
-    rowCount,
-    getPriceRows,
-  } = useBetStore();
-  
-  const [scrollX, setScrollX] = useState(0);
   const [mounted, setMounted] = useState(false);
-  const gridRef = useRef<HTMLDivElement>(null);
-  const startTimeRef = useRef(Date.now());
-  const lastColumnTimeRef = useRef(Date.now());
+  const [scrollX, setScrollX] = useState(0);
+  const animationRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
   
-  // Get price rows directly from store
+  const currentPrice = useBetStore((s) => s.currentPrice);
+  const addPricePoint = useBetStore((s) => s.addPricePoint);
+  const bets = useBetStore((s) => s.bets);
+  const columns = useBetStore((s) => s.columns);
+  const generateColumns = useBetStore((s) => s.generateColumns);
+  const resolveBet = useBetStore((s) => s.resolveBet);
+  const removeBet = useBetStore((s) => s.removeBet);
+  const priceStep = useBetStore((s) => s.priceStep);
+  const rowCount = useBetStore((s) => s.rowCount);
+  const getPriceRows = useBetStore((s) => s.getPriceRows);
+  
   const priceRows = getPriceRows();
+  const gridHeight = rowCount * ROW_HEIGHT;
 
-  // Client-side mount
+  // Mount and initialize
   useEffect(() => {
     setMounted(true);
     generateColumns();
-    startTimeRef.current = Date.now();
   }, [generateColumns]);
 
-  // Simulate price movement
+  // Price simulation
   useEffect(() => {
+    if (!mounted) return;
+    
     const interval = setInterval(() => {
       const drift = (Math.random() - 0.5) * 0.03;
-      const newPrice = currentPrice + drift;
-      addPricePoint(newPrice);
+      addPricePoint(currentPrice + drift);
     }, 200);
     
     return () => clearInterval(interval);
-  }, [currentPrice, addPricePoint]);
+  }, [mounted, currentPrice, addPricePoint]);
 
-  // Animation loop for scrolling - only run when mounted
-  useAnimationFrame((time, delta) => {
-    if (!mounted) return;
-    const deltaSeconds = delta / 1000;
-    setScrollX((prev) => prev + SCROLL_SPEED * deltaSeconds);
-    
-    // Add new columns as needed
-    const now = Date.now();
-    if (now - lastColumnTimeRef.current > COLUMN_INTERVAL * 1000) {
-      lastColumnTimeRef.current = now;
-      // Columns are generated in batch, so we just track for bet resolution
-    }
-  });
-
-  // Check for bet resolution
+  // Animation loop using requestAnimationFrame
   useEffect(() => {
+    if (!mounted) return;
+
+    const animate = (timestamp: number) => {
+      if (lastTimeRef.current === 0) {
+        lastTimeRef.current = timestamp;
+      }
+      
+      const delta = timestamp - lastTimeRef.current;
+      lastTimeRef.current = timestamp;
+      
+      setScrollX((prev) => prev + SCROLL_SPEED * (delta / 1000));
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [mounted]);
+
+  // Bet resolution
+  useEffect(() => {
+    if (!mounted) return;
+    
     const interval = setInterval(() => {
       const now = Date.now();
       
       bets.forEach((bet) => {
         if (bet.status !== 'pending') return;
         
-        // Check if column has passed the price line
         const column = columns.find((c) => c.id === bet.columnId);
         if (!column) return;
         
@@ -83,27 +92,19 @@ export function BettingGrid() {
         const columnScrolled = columnAge * SCROLL_SPEED;
         const columnX = VISIBLE_COLUMNS * COLUMN_WIDTH - columnScrolled;
         
-        // Column reached price line
         if (columnX <= PRICE_LINE_X) {
-          // Check if price matches target row
           const priceMatch = Math.abs(currentPrice - bet.targetPrice) < priceStep / 2;
           resolveBet(bet.id, priceMatch);
-          
-          // Remove after animation
           setTimeout(() => removeBet(bet.id), 3000);
         }
       });
     }, 100);
     
     return () => clearInterval(interval);
-  }, [bets, columns, currentPrice, priceStep, resolveBet, removeBet]);
+  }, [mounted, bets, columns, currentPrice, priceStep, resolveBet, removeBet]);
 
-  // Calculate multiplier based on column distance
   const getMultiplier = (columnIndex: number) => {
-    // Farther columns (more time) = lower multiplier
-    // Closer columns (less time) = higher multiplier
     const timeToArrival = columnIndex * COLUMN_INTERVAL;
-    
     if (timeToArrival <= 3) return 5.0;
     if (timeToArrival <= 6) return 3.5;
     if (timeToArrival <= 9) return 2.5;
@@ -112,16 +113,13 @@ export function BettingGrid() {
     return 1.2;
   };
 
-  // Get bet for a specific cell
   const getBetForCell = (rowPrice: number, columnId: string): Bet | undefined => {
     return bets.find(
       (b) => Math.abs(b.targetPrice - rowPrice) < 0.01 && b.columnId === columnId
     );
   };
 
-  const gridHeight = rowCount * ROW_HEIGHT;
-
-  // Show loading state until mounted and columns are ready
+  // Loading state
   if (!mounted || columns.length === 0) {
     return (
       <div className="w-full max-w-5xl mx-auto">
@@ -143,20 +141,11 @@ export function BettingGrid() {
         <div className="flex items-center gap-4">
           <div className="text-right">
             <div className="text-sm text-zinc-500">Live Price</div>
-            <motion.div
-              key={currentPrice.toFixed(2)}
-              initial={{ scale: 1.1 }}
-              animate={{ scale: 1 }}
-              className="text-2xl font-mono font-bold text-white"
-            >
+            <div className="text-2xl font-mono font-bold text-white">
               ${currentPrice.toFixed(4)}
-            </motion.div>
+            </div>
           </div>
-          <motion.div 
-            className="w-3 h-3 rounded-full bg-green-500"
-            animate={{ scale: [1, 1.3, 1] }}
-            transition={{ repeat: Infinity, duration: 1 }}
-          />
+          <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
         </div>
       </div>
 
@@ -182,18 +171,12 @@ export function BettingGrid() {
 
         {/* Scrolling Grid */}
         <div 
-          ref={gridRef}
           className="absolute top-2 bottom-2 overflow-hidden"
-          style={{ 
-            left: PRICE_LINE_X,
-            right: 10,
-          }}
+          style={{ left: PRICE_LINE_X, right: 10 }}
         >
-          <motion.div
+          <div
             className="flex flex-col gap-1"
-            style={{ 
-              transform: `translateX(${-scrollX % (COLUMN_WIDTH * COLUMN_INTERVAL)}px)`,
-            }}
+            style={{ transform: `translateX(${-scrollX % (COLUMN_WIDTH * COLUMN_INTERVAL)}px)` }}
           >
             {/* Price Rows */}
             {priceRows.map((price, rowIndex) => (
@@ -214,7 +197,6 @@ export function BettingGrid() {
                 
                 {/* Cells */}
                 {columns.slice(0, VISIBLE_COLUMNS).map((column, colIndex) => {
-                  // Use a stable arrival time based on column creation
                   const arrivalTime = column.createdAt + column.timeOffset * 1000;
                   
                   return (
@@ -231,7 +213,7 @@ export function BettingGrid() {
                 })}
               </div>
             ))}
-          </motion.div>
+          </div>
         </div>
 
         {/* Left fade overlay */}
@@ -247,11 +229,7 @@ export function BettingGrid() {
 
       {/* Active Bets Summary */}
       {bets.filter((b) => b.status === 'pending' && b.isOwn).length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-4 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4"
-        >
+        <div className="mt-4 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
           <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">
             Your Active Bets ({bets.filter((b) => b.status === 'pending' && b.isOwn).length})
           </h3>
@@ -269,11 +247,10 @@ export function BettingGrid() {
                   <div className="text-xs text-zinc-400">
                     {bet.amount} SOL @ {bet.multiplier}x
                   </div>
-                  <CountdownTimer targetTime={bet.arrivalTime} />
                 </div>
               ))}
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Legend */}
@@ -301,30 +278,6 @@ export function BettingGrid() {
 
       {/* Confetti */}
       <Confetti />
-    </div>
-  );
-}
-
-// Countdown component
-function CountdownTimer({ targetTime }: { targetTime: number }) {
-  const [timeLeft, setTimeLeft] = useState(0);
-
-  useEffect(() => {
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((targetTime - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-    
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [targetTime]);
-
-  return (
-    <div className={`text-xs font-mono font-bold ${
-      timeLeft <= 3 ? 'text-red-400' : 'text-orange-400'
-    }`}>
-      {timeLeft}s
     </div>
   );
 }
