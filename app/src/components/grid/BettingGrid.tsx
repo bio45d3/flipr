@@ -27,33 +27,20 @@ export function BettingGrid() {
   } = useBetStore();
   
   const [scrollX, setScrollX] = useState(0);
-  const [priceRows, setPriceRows] = useState<number[]>([]);
+  const [mounted, setMounted] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const startTimeRef = useRef(Date.now());
   const lastColumnTimeRef = useRef(Date.now());
+  
+  // Get price rows directly from store
+  const priceRows = getPriceRows();
 
-  // Initialize
+  // Client-side mount
   useEffect(() => {
+    setMounted(true);
     generateColumns();
-    setPriceRows(getPriceRows());
     startTimeRef.current = Date.now();
-  }, []);
-
-  // Update price rows when price changes significantly
-  useEffect(() => {
-    const rows = getPriceRows();
-    if (rows.length > 0) {
-      const currentMin = Math.min(...priceRows);
-      const currentMax = Math.max(...priceRows);
-      const newMin = Math.min(...rows);
-      const newMax = Math.max(...rows);
-      
-      // Only update if price drifted outside current range
-      if (priceRows.length === 0 || currentPrice < currentMin || currentPrice > currentMax) {
-        setPriceRows(rows);
-      }
-    }
-  }, [currentPrice]);
+  }, [generateColumns]);
 
   // Simulate price movement
   useEffect(() => {
@@ -66,8 +53,9 @@ export function BettingGrid() {
     return () => clearInterval(interval);
   }, [currentPrice, addPricePoint]);
 
-  // Animation loop for scrolling
+  // Animation loop for scrolling - only run when mounted
   useAnimationFrame((time, delta) => {
+    if (!mounted) return;
     const deltaSeconds = delta / 1000;
     setScrollX((prev) => prev + SCROLL_SPEED * deltaSeconds);
     
@@ -132,6 +120,17 @@ export function BettingGrid() {
   };
 
   const gridHeight = rowCount * ROW_HEIGHT;
+
+  // Show loading state until mounted and columns are ready
+  if (!mounted || columns.length === 0) {
+    return (
+      <div className="w-full max-w-5xl mx-auto">
+        <div className="flex items-center justify-center h-[620px] bg-[#0a0a0f] border border-zinc-800 rounded-xl">
+          <div className="text-zinc-500">Loading grid...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-5xl mx-auto">
