@@ -77,7 +77,7 @@ export function BettingGrid() {
           if (columnsTraveled >= bet.column) {
             // Resolve the bet
             const won = Math.abs(currentPrice - bet.price) < PRICE_STEP / 2;
-            return { ...bet, status: won ? 'won' : 'lost' };
+            return { ...bet, status: (won ? 'won' : 'lost') as 'won' | 'lost' };
           }
           return bet;
         }).filter(bet => {
