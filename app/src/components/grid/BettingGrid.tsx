@@ -1,214 +1,329 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { PriceRow } from './PriceRow';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { motion, useAnimationFrame } from 'framer-motion';
+import { GridCell } from './GridCell';
 import { PriceLine } from './PriceLine';
 import { BetModal } from './BetModal';
 import { Confetti } from './Confetti';
-import { useBetStore } from '@/store/betStore';
+import { useBetStore, COLUMN_WIDTH, SCROLL_SPEED, COLUMN_INTERVAL, Bet } from '@/store/betStore';
 
-// Time windows in seconds
-const TIME_WINDOWS = [5, 10, 15, 30, 45, 60];
-
-// Generate price levels around current price
-function generatePriceLevels(currentPrice: number, count: number = 11): number[] {
-  const step = 0.05; // $0.05 increments
-  const halfCount = Math.floor(count / 2);
-  const levels: number[] = [];
-  
-  for (let i = halfCount; i >= -halfCount; i--) {
-    levels.push(parseFloat((currentPrice + (i * step)).toFixed(2)));
-  }
-  
-  return levels;
-}
+const ROW_HEIGHT = 75;
+const PRICE_LINE_X = 130; // px from left where price line sits
+const VISIBLE_COLUMNS = 12;
 
 export function BettingGrid() {
-  const { currentPrice, setCurrentPrice, bets } = useBetStore();
-  const [priceLevels, setPriceLevels] = useState<number[]>([]);
+  const {
+    currentPrice,
+    addPricePoint,
+    bets,
+    columns,
+    generateColumns,
+    resolveBet,
+    removeBet,
+    priceStep,
+    rowCount,
+    getPriceRows,
+  } = useBetStore();
+  
+  const [scrollX, setScrollX] = useState(0);
+  const [priceRows, setPriceRows] = useState<number[]>([]);
   const gridRef = useRef<HTMLDivElement>(null);
-  const [gridHeight, setGridHeight] = useState(0);
+  const startTimeRef = useRef(Date.now());
+  const lastColumnTimeRef = useRef(Date.now());
 
-  // Initialize price levels
+  // Initialize
   useEffect(() => {
-    setPriceLevels(generatePriceLevels(currentPrice));
+    generateColumns();
+    setPriceRows(getPriceRows());
+    startTimeRef.current = Date.now();
   }, []);
 
-  // Measure grid height for price line positioning
+  // Update price rows when price changes significantly
   useEffect(() => {
-    if (gridRef.current) {
-      setGridHeight(gridRef.current.offsetHeight);
+    const rows = getPriceRows();
+    if (rows.length > 0) {
+      const currentMin = Math.min(...priceRows);
+      const currentMax = Math.max(...priceRows);
+      const newMin = Math.min(...rows);
+      const newMax = Math.max(...rows);
+      
+      // Only update if price drifted outside current range
+      if (priceRows.length === 0 || currentPrice < currentMin || currentPrice > currentMax) {
+        setPriceRows(rows);
+      }
     }
-  }, [priceLevels]);
+  }, [currentPrice]);
 
   // Simulate price movement
   useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentPrice(currentPrice + (Math.random() - 0.5) * 0.02);
-    }, 500);
+      const drift = (Math.random() - 0.5) * 0.03;
+      const newPrice = currentPrice + drift;
+      addPricePoint(newPrice);
+    }, 200);
     
     return () => clearInterval(interval);
-  }, [currentPrice, setCurrentPrice]);
+  }, [currentPrice, addPricePoint]);
 
-  // Update price levels when price drifts too far
-  useEffect(() => {
-    if (priceLevels.length > 0) {
-      const minLevel = Math.min(...priceLevels);
-      const maxLevel = Math.max(...priceLevels);
-      
-      if (currentPrice < minLevel + 0.1 || currentPrice > maxLevel - 0.1) {
-        setPriceLevels(generatePriceLevels(currentPrice));
-      }
+  // Animation loop for scrolling
+  useAnimationFrame((time, delta) => {
+    const deltaSeconds = delta / 1000;
+    setScrollX((prev) => prev + SCROLL_SPEED * deltaSeconds);
+    
+    // Add new columns as needed
+    const now = Date.now();
+    if (now - lastColumnTimeRef.current > COLUMN_INTERVAL * 1000) {
+      lastColumnTimeRef.current = now;
+      // Columns are generated in batch, so we just track for bet resolution
     }
-  }, [currentPrice, priceLevels]);
+  });
 
-  const priceRange = priceLevels.length > 0 
-    ? { min: Math.min(...priceLevels), max: Math.max(...priceLevels) }
-    : { min: currentPrice - 0.25, max: currentPrice + 0.25 };
+  // Check for bet resolution
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      
+      bets.forEach((bet) => {
+        if (bet.status !== 'pending') return;
+        
+        // Check if column has passed the price line
+        const column = columns.find((c) => c.id === bet.columnId);
+        if (!column) return;
+        
+        const columnAge = (now - column.createdAt) / 1000;
+        const columnScrolled = columnAge * SCROLL_SPEED;
+        const columnX = VISIBLE_COLUMNS * COLUMN_WIDTH - columnScrolled;
+        
+        // Column reached price line
+        if (columnX <= PRICE_LINE_X) {
+          // Check if price matches target row
+          const priceMatch = Math.abs(currentPrice - bet.targetPrice) < priceStep / 2;
+          resolveBet(bet.id, priceMatch);
+          
+          // Remove after animation
+          setTimeout(() => removeBet(bet.id), 3000);
+        }
+      });
+    }, 100);
+    
+    return () => clearInterval(interval);
+  }, [bets, columns, currentPrice, priceStep, resolveBet, removeBet]);
+
+  // Calculate multiplier based on column distance
+  const getMultiplier = (columnIndex: number) => {
+    // Farther columns (more time) = lower multiplier
+    // Closer columns (less time) = higher multiplier
+    const timeToArrival = columnIndex * COLUMN_INTERVAL;
+    
+    if (timeToArrival <= 3) return 5.0;
+    if (timeToArrival <= 6) return 3.5;
+    if (timeToArrival <= 9) return 2.5;
+    if (timeToArrival <= 15) return 2.0;
+    if (timeToArrival <= 24) return 1.5;
+    return 1.2;
+  };
+
+  // Get bet for a specific cell
+  const getBetForCell = (rowPrice: number, columnId: string): Bet | undefined => {
+    return bets.find(
+      (b) => Math.abs(b.targetPrice - rowPrice) < 0.01 && b.columnId === columnId
+    );
+  };
+
+  const gridHeight = rowCount * ROW_HEIGHT;
 
   return (
-    <div className="w-full max-w-4xl mx-auto">
-      {/* Grid Header */}
+    <div className="w-full max-w-5xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-xl font-bold text-white">SOL/USD</h2>
-          <p className="text-sm text-zinc-500">Select a price target and time window</p>
+          <h2 className="text-xl font-bold text-white">SOL/USD Grid</h2>
+          <p className="text-sm text-zinc-500">Click cells ahead of the price line to bet</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-sm text-zinc-500">Current Price</div>
+            <div className="text-sm text-zinc-500">Live Price</div>
             <motion.div
               key={currentPrice.toFixed(2)}
-              initial={{ scale: 1.1, color: '#fff' }}
-              animate={{ scale: 1, color: '#a1a1aa' }}
-              className="text-2xl font-mono font-bold"
+              initial={{ scale: 1.1 }}
+              animate={{ scale: 1 }}
+              className="text-2xl font-mono font-bold text-white"
             >
               ${currentPrice.toFixed(4)}
             </motion.div>
           </div>
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <motion.div 
+            className="w-3 h-3 rounded-full bg-green-500"
+            animate={{ scale: [1, 1.3, 1] }}
+            transition={{ repeat: Infinity, duration: 1 }}
+          />
         </div>
       </div>
 
-      {/* Time Headers */}
-      <div className="flex ml-20 mb-2 gap-1">
-        {TIME_WINDOWS.map((tw) => (
-          <div
-            key={tw}
-            className="min-w-[80px] text-center text-xs text-zinc-500 font-medium"
-          >
-            {tw}s
+      {/* Time axis labels */}
+      <div className="flex mb-2 text-xs text-zinc-500 font-medium" style={{ paddingLeft: PRICE_LINE_X + 10 }}>
+        {Array.from({ length: VISIBLE_COLUMNS }).map((_, i) => (
+          <div key={i} className="text-center" style={{ width: COLUMN_WIDTH }}>
+            {i * COLUMN_INTERVAL}s
           </div>
         ))}
       </div>
 
-      {/* Grid Container */}
-      <div className="relative bg-[#0a0a0f] border border-zinc-800 rounded-xl p-4 overflow-hidden">
-        {/* Price Line */}
-        <PriceLine
-          currentPrice={currentPrice}
-          priceRange={priceRange}
-          gridHeight={gridHeight}
+      {/* Main Grid Container */}
+      <div 
+        className="relative bg-[#0a0a0f] border border-zinc-800 rounded-xl overflow-hidden"
+        style={{ height: gridHeight + 20 }}
+      >
+        {/* Price Line (fixed position) */}
+        <PriceLine 
+          gridHeight={gridHeight} 
+          rowHeight={ROW_HEIGHT}
         />
 
-        {/* Grid Rows */}
-        <div ref={gridRef} className="relative space-y-1">
-          {priceLevels.map((price) => (
-            <PriceRow
-              key={price}
-              price={price}
-              timeWindows={TIME_WINDOWS}
-              currentPrice={currentPrice}
-              bets={bets}
-            />
-          ))}
+        {/* Scrolling Grid */}
+        <div 
+          ref={gridRef}
+          className="absolute top-2 bottom-2 overflow-hidden"
+          style={{ 
+            left: PRICE_LINE_X,
+            right: 10,
+          }}
+        >
+          <motion.div
+            className="flex flex-col gap-1"
+            style={{ 
+              transform: `translateX(${-scrollX % (COLUMN_WIDTH * COLUMN_INTERVAL)}px)`,
+            }}
+          >
+            {/* Price Rows */}
+            {priceRows.map((price, rowIndex) => (
+              <div key={price} className="flex gap-1">
+                {/* Row label */}
+                <div 
+                  className={`flex items-center justify-end pr-2 font-mono text-sm shrink-0 ${
+                    Math.abs(price - currentPrice) < priceStep / 2
+                      ? 'text-white font-bold'
+                      : price > currentPrice 
+                        ? 'text-green-400/70' 
+                        : 'text-red-400/70'
+                  }`}
+                  style={{ width: 70 }}
+                >
+                  ${price.toFixed(2)}
+                </div>
+                
+                {/* Cells */}
+                {columns.slice(0, VISIBLE_COLUMNS).map((column, colIndex) => {
+                  const now = Date.now();
+                  const timeToArrival = column.timeOffset - ((now - column.createdAt) / 1000);
+                  
+                  return (
+                    <GridCell
+                      key={`${price}-${column.id}`}
+                      row={rowIndex}
+                      columnId={column.id}
+                      targetPrice={price}
+                      multiplier={getMultiplier(colIndex)}
+                      arrivalTime={now + timeToArrival * 1000}
+                      bet={getBetForCell(price, column.id)}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </motion.div>
         </div>
 
-        {/* Grid overlay glow effect */}
-        <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-purple-500/5 via-transparent to-pink-500/5" />
+        {/* Left fade overlay */}
+        <div 
+          className="absolute top-0 bottom-0 pointer-events-none z-20"
+          style={{
+            left: PRICE_LINE_X - 30,
+            width: 40,
+            background: 'linear-gradient(to right, #0a0a0f, transparent)',
+          }}
+        />
       </div>
 
       {/* Active Bets Summary */}
-      {bets.filter((b) => b.status === 'active').length > 0 && (
+      {bets.filter((b) => b.status === 'pending' && b.isOwn).length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="mt-4 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4"
         >
           <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">
-            Active Bets ({bets.filter((b) => b.status === 'active').length})
+            Your Active Bets ({bets.filter((b) => b.status === 'pending' && b.isOwn).length})
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+          <div className="flex flex-wrap gap-2">
             {bets
-              .filter((b) => b.status === 'active')
+              .filter((b) => b.status === 'pending' && b.isOwn)
               .map((bet) => (
                 <div
                   key={bet.id}
-                  className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg p-2"
+                  className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg px-3 py-2"
                 >
-                  <div className="w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center text-orange-400 text-xs">
-                    {bet.targetPrice > bet.entryPrice ? '↑' : '↓'}
+                  <div className="text-sm font-medium text-orange-300">
+                    ${bet.targetPrice.toFixed(2)}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-white truncate">
-                      ${bet.targetPrice.toFixed(2)} @ {bet.multiplier}x
-                    </div>
-                    <div className="text-[10px] text-zinc-500">
-                      {bet.amount} SOL • {bet.timeWindow}s
-                    </div>
+                  <div className="text-xs text-zinc-400">
+                    {bet.amount} SOL @ {bet.multiplier}x
                   </div>
-                  <CountdownTimer expiresAt={bet.expiresAt} />
+                  <CountdownTimer targetTime={bet.arrivalTime} />
                 </div>
               ))}
           </div>
         </motion.div>
       )}
 
-      {/* Bet Modal */}
-      <BetModal />
-
-      {/* Confetti Effect */}
-      <Confetti />
-
       {/* Legend */}
       <div className="mt-4 flex items-center justify-center gap-6 text-xs text-zinc-500">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded bg-orange-500/50 border border-orange-500" />
-          <span>Active</span>
+          <div className="w-4 h-4 rounded bg-orange-500/30 border-2 border-orange-500" />
+          <span>Your Bet</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded bg-green-500/50 border border-green-500" />
+          <div className="w-4 h-4 rounded bg-purple-500/30 border-2 border-purple-500" />
+          <span>Others</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-green-500/40 border-2 border-green-400" />
           <span>Won</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded bg-red-500/30 border border-red-500" />
+          <div className="w-4 h-4 rounded bg-red-500/30 border-2 border-red-500/50 opacity-40" />
           <span>Lost</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-[2px] bg-red-500" />
-          <span>Current Price</span>
-        </div>
       </div>
+
+      {/* Bet Modal */}
+      <BetModal />
+
+      {/* Confetti */}
+      <Confetti />
     </div>
   );
 }
 
-// Countdown timer component
-function CountdownTimer({ expiresAt }: { expiresAt: number }) {
-  const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
+// Countdown component
+function CountdownTimer({ targetTime }: { targetTime: number }) {
+  const [timeLeft, setTimeLeft] = useState(0);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setTimeLeft(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
-    }, 100);
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((targetTime - Date.now()) / 1000));
+      setTimeLeft(remaining);
+    };
     
+    update();
+    const interval = setInterval(update, 100);
     return () => clearInterval(interval);
-  }, [expiresAt]);
+  }, [targetTime]);
 
   return (
     <div className={`text-xs font-mono font-bold ${
-      timeLeft <= 5 ? 'text-red-400' : 'text-orange-400'
+      timeLeft <= 3 ? 'text-red-400' : 'text-orange-400'
     }`}>
       {timeLeft}s
     </div>

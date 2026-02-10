@@ -619,3 +619,32 @@ For sub-50ms latency:
 5. **Frontend development**: Parallel to program testing
 
 Ready to start building? Let me know which phase to begin with.
+
+---
+
+## MagicBlock Integration
+
+### Why MagicBlock?
+- **Ephemeral Rollups**: Near-instant bet placement (no waiting for Solana block times)
+- **Session Keys**: Users don't need to sign every bet transaction
+- **Used by risk.lol**: Proven for this exact use case
+
+### Ephemeral Validator Endpoints
+- Mainnet EU: `eu.magicblock.app` (MEUGGrYPxKk17hCr7wpT6s8dtNokZj5U2L57vjYMS8e)
+- Mainnet US: `us.magicblock.app` (MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd)
+- Devnet EU: `devnet-eu.magicblock.app`
+
+### Integration Flow
+1. User connects wallet
+2. Create session key (one-time signature)
+3. Bet placement → delegate to MagicBlock ephemeral validator
+4. Fast confirmation (~100ms vs ~400ms)
+5. Settlement → commits back to mainnet Solana
+
+### NPM Packages
+- `@magicblock-labs/bolt-sdk` — TypeScript client
+- `@magicblock-labs/ephemeral-rollups-sdk` — Ephemeral rollup integration
+
+### Resources
+- Docs: https://docs.magicblock.gg
+- GitHub: https://github.com/magicblock-labs
